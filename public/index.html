@@ -115,15 +115,16 @@
   <div class="gap"></div>
   <input type="text" id="player-name" placeholder="Your name" maxlength="16" autocomplete="off">
   <div class="gap"></div>
-  <select id="player-count">
-    <option value="2">2 Players (head to head)</option>
-    <option value="4">4 Players (teams of 2)</option>
+  <select id="game-mode">
+    <option value="online-2">2 Players (online)</option>
+    <option value="online-4">4 Players (online teams)</option>
+    <option value="cpu">vs Computer 🤖</option>
   </select>
   <div class="gap"></div>
-  <button class="btn btn-gold" onclick="createRoom()">Create Game</button>
-  <div class="or-div">— or —</div>
-  <input type="text" id="join-code" placeholder="Enter room code" maxlength="12" autocomplete="off" style="text-transform:uppercase">
-  <button class="btn btn-green" onclick="joinRoom()">Join Game</button>
+  <button class="btn btn-gold" onclick="createRoom()">Start Game</button>
+  <div class="or-div" id="or-div">— or —</div>
+  <input type="text" id="join-code" placeholder="Enter room code" maxlength="12" autocomplete="off" style="text-transform:uppercase" id="join-code-input">
+  <button class="btn btn-green" id="join-btn" onclick="joinRoom()">Join Game</button>
   <p class="error" id="home-error"></p>
 </div>
 
@@ -248,6 +249,7 @@ var myIndex = -1;
 var myHand = [];
 var selectedCardId = null;
 var gameState = null;
+var isVsComputer = false;
 
 var discardSelected = {};
 var discardIsBidWinner = false;
@@ -344,17 +346,45 @@ function teamName(teamIdx, players, maxPlayers) {
 }
 
 // ── Home ──────────────────────────────────
+// Toggle join controls based on game mode
+document.getElementById('game-mode').addEventListener('change', function() {
+  var mode = this.value;
+  var isCpu = (mode === 'cpu');
+  document.getElementById('or-div').style.display = isCpu ? 'none' : '';
+  document.getElementById('join-code').style.display = isCpu ? 'none' : '';
+  document.getElementById('join-btn').style.display = isCpu ? 'none' : '';
+});
+
 function createRoom() {
   var name = document.getElementById('player-name').value.trim() || 'Player 1';
-  var maxP = parseInt(document.getElementById('player-count').value);
+  var mode = document.getElementById('game-mode').value;
   document.getElementById('home-error').textContent = '';
-  socket.emit('create-room', { name:name, maxPlayers:maxP }, function(res) {
+
+  var maxP = 2;
+  var vsComputer = false;
+  if (mode === 'online-4') maxP = 4;
+  else if (mode === 'cpu') { maxP = 2; vsComputer = true; }
+
+  socket.emit('create-room', { name: name, maxPlayers: maxP, vsComputer: vsComputer }, function(res) {
     if (res.success) {
       roomCode = res.code; isHost = true; myIndex = 0;
-      document.getElementById('lobby-code').textContent = res.code;
-      document.getElementById('lobby-mode').textContent = maxP + '-player game';
-      showScreen('screen-lobby');
-      updateLobby([name], maxP);
+      isVsComputer = res.vsComputer || false;
+
+      if (isVsComputer) {
+        // Skip lobby, go straight to game
+        document.getElementById('lobby-code').textContent = res.code;
+        showScreen('screen-lobby');
+        updateLobby([name, '🤖 Computer'], 2);
+        // Auto-start after a moment
+        setTimeout(function() {
+          socket.emit('start-game', { code: roomCode });
+        }, 1000);
+      } else {
+        document.getElementById('lobby-code').textContent = res.code;
+        document.getElementById('lobby-mode').textContent = maxP + '-player game';
+        showScreen('screen-lobby');
+        updateLobby([name], maxP);
+      }
     } else {
       document.getElementById('home-error').textContent = res.error;
     }
@@ -398,6 +428,7 @@ function startGame() {
 
 // ── New hand / Bidding ────────────────────
 socket.on('new-hand', function(data) {
+  playSound('card-deal');
   myIndex = data.playerIndex;
   myHand = data.hand;
   document.getElementById('bid-scores').textContent = formatScores(data.scores, data.players, data.maxPlayers);
@@ -417,7 +448,7 @@ socket.on('new-hand', function(data) {
   showScreen('screen-bid');
 });
 
-function showBidControls(minBid) {
+function showBidControls(minBid, noPass) {
   var container = document.getElementById('bid-buttons');
   container.innerHTML = '';
   for (var b = 3; b <= 6; b++) {
@@ -428,10 +459,12 @@ function showBidControls(minBid) {
     btn.onclick = function() { placeBid(parseInt(this.getAttribute('data-bid'))); };
     container.appendChild(btn);
   }
-  var passBtn = document.createElement('button');
-  passBtn.className = 'bid-btn pass-btn'; passBtn.textContent = 'Pass';
-  passBtn.onclick = function() { placeBid(0); };
-  container.appendChild(passBtn);
+  if (!noPass) {
+    var passBtn = document.createElement('button');
+    passBtn.className = 'bid-btn pass-btn'; passBtn.textContent = 'Pass';
+    passBtn.onclick = function() { placeBid(0); };
+    container.appendChild(passBtn);
+  }
   document.getElementById('bid-controls').style.display = '';
   document.getElementById('bid-waiting').style.display = 'none';
 }
@@ -444,16 +477,23 @@ function placeBid(bid) {
 }
 
 socket.on('bid-placed', function(data) {
+  playSound('bid');
   var msg = data.playerName + (data.forced ? ' stuck with 3' : (data.bid === 0 ? ' passed' : ' bid ' + data.bid));
   document.getElementById('bid-status').textContent = msg;
 });
 
 socket.on('bidding-turn', function(data) {
   if (data.currentBidder === myIndex) {
-    showBidControls(data.highBid);
-    var statusMsg = 'Your bid!';
-    if (data.highBid > 0) statusMsg += ' (high: ' + data.highBid + ' by ' + data.highBidderName + ')';
-    document.getElementById('bid-status').textContent = statusMsg;
+    if (data.dealerStuck) {
+      // Dealer stuck — must bid at least 3, no pass allowed
+      showBidControls(-1, true);
+      document.getElementById('bid-status').textContent = 'You\'re the dealer — everyone passed! You must bid (min 3).';
+    } else {
+      showBidControls(data.highBid, false);
+      var statusMsg = 'Your bid!';
+      if (data.highBid > 0) statusMsg += ' (high: ' + data.highBid + ' by ' + data.highBidderName + ')';
+      document.getElementById('bid-status').textContent = statusMsg;
+    }
   } else {
     document.getElementById('bid-controls').style.display = 'none';
     document.getElementById('bid-waiting').style.display = '';
@@ -479,6 +519,7 @@ socket.on('waiting-for-trump', function(data) {
 });
 
 function selectTrump(suit) {
+  playSound('trump-select');
   socket.emit('select-trump', { code:roomCode, suit:suit });
 }
 
@@ -607,7 +648,13 @@ function playSelectedCard() {
   document.getElementById('play-card-btn').style.display = 'none';
 }
 
-socket.on('card-played', function(data) {});
+socket.on('card-played', function(data) {
+  if (data.card && data.card.rank === 'Joker') {
+    playSound('joker');
+  } else {
+    playSound('card-play');
+  }
+});
 
 socket.on('invalid-play', function(data) {
   showToast(data.message);
@@ -622,6 +669,7 @@ socket.on('invalid-play', function(data) {
 
 // ── Trick result ──────────────────────────
 socket.on('trick-result', function(data) {
+  playSound('trick-win');
   document.getElementById('trick-winner-text').textContent = data.winnerName + ' takes it!';
   var area = document.getElementById('trick-result-cards');
   area.innerHTML = '';
@@ -633,6 +681,11 @@ socket.on('trick-result', function(data) {
 
 // ── Hand result ───────────────────────────
 socket.on('hand-result', function(data) {
+  if (data.madeIt) {
+    playSound('made-it');
+  } else {
+    playSound('set-back');
+  }
   var bidderTeamName = teamName(data.bidderTeam, data.players, data.maxPlayers);
   var titleEl = document.getElementById('result-title');
   if (data.madeIt) {
@@ -743,6 +796,7 @@ socket.on('hand-result', function(data) {
 function nextHand() { socket.emit('next-hand', { code:roomCode }); }
 
 function showGameOver(data) {
+  playSound('game-over');
   document.getElementById('gameover-text').textContent = teamName(data.winner, data.players, data.maxPlayers) + ' wins!';
   var scoresEl = document.getElementById('gameover-scores');
   scoresEl.innerHTML = '';
@@ -762,6 +816,204 @@ socket.on('player-left', function(data) {
 });
 
 document.getElementById('join-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') joinRoom(); });
+
+// ── Sound Effects (Web Audio API) ─────────
+var audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playSound(type) {
+  try {
+    var ctx = getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+
+    if (type === 'card-play') {
+      // Card drop/place — thud with paper flutter
+      // White noise burst for the paper sound
+      var bufSize = ctx.sampleRate * 0.06;
+      var buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+      var data = buf.getChannelData(0);
+      for (var i = 0; i < bufSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufSize, 3);
+      }
+      var noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      var noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.18, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+      // Filter to make it sound like card hitting table
+      var filt = ctx.createBiquadFilter();
+      filt.type = 'bandpass';
+      filt.frequency.value = 1200;
+      filt.Q.value = 0.8;
+      noise.connect(filt); filt.connect(noiseGain); noiseGain.connect(ctx.destination);
+      noise.start(ctx.currentTime); noise.stop(ctx.currentTime + 0.08);
+
+      // Low thump for the table hit
+      var o = ctx.createOscillator();
+      var g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(150, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.05);
+      g.gain.setValueAtTime(0.2, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.1);
+    }
+
+    else if (type === 'card-deal') {
+      // Card slide/deal — lighter version of card drop
+      var bufSize = ctx.sampleRate * 0.04;
+      var buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+      var data = buf.getChannelData(0);
+      for (var i = 0; i < bufSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufSize, 4);
+      }
+      var noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      var noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.1, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      var filt = ctx.createBiquadFilter();
+      filt.type = 'highpass';
+      filt.frequency.value = 2000;
+      noise.connect(filt); filt.connect(noiseGain); noiseGain.connect(ctx.destination);
+      noise.start(ctx.currentTime); noise.stop(ctx.currentTime + 0.06);
+    }
+
+    else if (type === 'bid') {
+      // Click/tap
+      var o = ctx.createOscillator();
+      var g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(1000, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.05);
+      g.gain.setValueAtTime(0.12, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.08);
+    }
+
+    else if (type === 'trump-select') {
+      // Fanfare — two rising notes
+      [0, 0.15].forEach(function(delay, i) {
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(i === 0 ? 523 : 784, ctx.currentTime + delay);
+        g.gain.setValueAtTime(0.15, ctx.currentTime + delay);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.3);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + delay); o.stop(ctx.currentTime + delay + 0.3);
+      });
+    }
+
+    else if (type === 'trick-win') {
+      // Sweep up
+      var o = ctx.createOscillator();
+      var g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(300, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.2);
+      g.gain.setValueAtTime(0.12, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.3);
+    }
+
+    else if (type === 'joker') {
+      // Power-up charge — rising shimmer with sparkle
+      var o1 = ctx.createOscillator();
+      var g1 = ctx.createGain();
+      o1.type = 'sine';
+      o1.frequency.setValueAtTime(200, ctx.currentTime);
+      o1.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.4);
+      g1.gain.setValueAtTime(0.05, ctx.currentTime);
+      g1.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.3);
+      g1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      o1.connect(g1); g1.connect(ctx.destination);
+      o1.start(ctx.currentTime); o1.stop(ctx.currentTime + 0.5);
+
+      // Harmonic shimmer layer
+      var o2 = ctx.createOscillator();
+      var g2 = ctx.createGain();
+      o2.type = 'triangle';
+      o2.frequency.setValueAtTime(400, ctx.currentTime);
+      o2.frequency.exponentialRampToValueAtTime(2400, ctx.currentTime + 0.4);
+      g2.gain.setValueAtTime(0.03, ctx.currentTime);
+      g2.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.3);
+      g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      o2.connect(g2); g2.connect(ctx.destination);
+      o2.start(ctx.currentTime); o2.stop(ctx.currentTime + 0.5);
+
+      // Final sparkle burst at the top
+      setTimeout(function() {
+        var sparkle = ctx.createOscillator();
+        var sg = ctx.createGain();
+        sparkle.type = 'sine';
+        sparkle.frequency.setValueAtTime(2000, ctx.currentTime);
+        sparkle.frequency.exponentialRampToValueAtTime(3000, ctx.currentTime + 0.1);
+        sg.gain.setValueAtTime(0.12, ctx.currentTime);
+        sg.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        sparkle.connect(sg); sg.connect(ctx.destination);
+        sparkle.start(ctx.currentTime); sparkle.stop(ctx.currentTime + 0.2);
+      }, 350);
+    }
+
+    else if (type === 'set-back') {
+      // Sad descending trombone
+      var notes = [400, 380, 350, 200];
+      notes.forEach(function(f, i) {
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(f, ctx.currentTime + i * 0.25);
+        g.gain.setValueAtTime(0.1, ctx.currentTime + i * 0.25);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.25);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + i * 0.25); o.stop(ctx.currentTime + i * 0.25 + 0.3);
+      });
+    }
+
+    else if (type === 'made-it') {
+      // Cha-ching / celebration
+      var notes = [523, 659, 784, 1047];
+      notes.forEach(function(f, i) {
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f, ctx.currentTime + i * 0.1);
+        g.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.1);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.1 + 0.2);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + i * 0.1); o.stop(ctx.currentTime + i * 0.1 + 0.25);
+      });
+    }
+
+    else if (type === 'game-over') {
+      // Victory fanfare
+      var notes = [523, 659, 784, 1047, 1047];
+      var durs =  [0.15, 0.15, 0.15, 0.15, 0.4];
+      var t = 0;
+      notes.forEach(function(f, i) {
+        var o = ctx.createOscillator();
+        var g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f, ctx.currentTime + t);
+        g.gain.setValueAtTime(0.18, ctx.currentTime + t);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + durs[i]);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + durs[i] + 0.05);
+        t += durs[i];
+      });
+    }
+
+  } catch(e) {
+    // Audio not supported, silently fail
+  }
+}
 </script>
 </body>
 </html>
