@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Setback</title>
+<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1b0e; --felt: #1a5c2a; --felt2: #1e6b31; --surface: #143d1c;
+    --gold: #f0c040; --gold-dim: #a08020; --red: #d43030;
+    --white: #f5f0e0; --white-dim: #b0a888; --black: #1a1a1a; --radius: 14px;
+  }
+  html, body {
+    height:100%; overflow:hidden;
+    background: radial-gradient(ellipse at center, var(--felt2) 0%, var(--felt) 40%, var(--bg) 100%);
+    color:var(--white); font-family:'Nunito',sans-serif;
+    -webkit-tap-highlight-color:transparent; user-select:none;
+  }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .screen { display:none; flex-direction:column; align-items:center; width:100%; max-width:420px; padding:16px; height:100%; justify-content:center; gap:12px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .screen.active { display:flex; }
+  h1 { font-family:'Alfa Slab One',serif; font-size:2.4em; color:var(--gold); text-align:center; text-shadow:0 2px 8px rgba(0,0,0,0.5); }
+  h2 { font-family:'Alfa Slab One',serif; font-size:1.4em; color:var(--gold); text-align:center; }
+  .sub { color:var(--white-dim); font-size:0.95em; text-align:center; font-weight:600; }
+  .btn { font-family:'Nunito',sans-serif; font-weight:800; font-size:1em; border:none; border-radius:var(--radius); padding:12px 28px; cursor:pointer; width:100%; max-width:280px; transition:transform 0.12s; }
+  .btn:active { transform:scale(0.96); }
+  .btn-gold { background:linear-gradient(135deg,var(--gold),#e0a820); color:var(--black); box-shadow:0 3px 12px rgba(240,192,64,0.3); }
+  .btn-green { background:linear-gradient(135deg,#2a8a40,#1e6b31); color:#fff; border:2px solid rgba(255,255,255,0.15); }
+  .btn-red { background:var(--red); color:#fff; }
+  .btn-sm { padding:10px 18px; font-size:0.9em; width:auto; max-width:none; }
+  .btn:disabled { opacity:0.4; pointer-events:none; }
+  input, select { font-family:'Nunito',sans-serif; font-size:1em; font-weight:700; background:var(--surface); border:2px solid rgba(255,255,255,0.1); border-radius:var(--radius); padding:12px 16px; color:var(--white); width:100%; max-width:280px; text-align:center; outline:none; }
+  input:focus { border-color:var(--gold); }
+  input::placeholder { color:var(--white-dim); }
+  .room-code { font-family:'Alfa Slab One',serif; font-size:2em; color:var(--gold); letter-spacing:3px; background:var(--surface); border-radius:var(--radius); padding:10px 20px; }
+  .gap { height:8px; }
+  .error { color:var(--red); font-weight:700; font-size:0.9em; min-height:1.2em; }
+  .or-div { color:var(--white-dim); font-weight:700; font-size:0.9em; }
+  .player-list { list-style:none; text-align:center; }
+  .player-list li { padding:4px 0; font-weight:700; color:var(--gold); }
+
+  .card { display:inline-flex; flex-direction:column; align-items:center; justify-content:center; width:52px; height:76px; border-radius:8px; font-weight:800; font-size:0.95em; cursor:pointer; transition:transform 0.15s, box-shadow 0.15s; position:relative; border:2px solid rgba(0,0,0,0.2); flex-shrink:0; }
+  .card:active { transform:scale(0.95)!important; }
+  .card.red { background:#fff; color:var(--red); }
+  .card.black { background:#fff; color:var(--black); }
+  .card.joker-card { background:linear-gradient(135deg,#9b30ff,#ff6090); color:#fff; }
+  .card.selected { transform:translateY(-12px); box-shadow:0 4px 16px rgba(240,192,64,0.5); border-color:var(--gold); }
+  .card.disabled { opacity:0.4; pointer-events:none; }
+  .card .card-rank { font-size:0.85em; line-height:1; }
+  .card .card-suit { font-size:1em; line-height:1; }
+  .hand-area { display:flex; gap:3px; flex-wrap:wrap; justify-content:center; width:100%; max-width:400px; padding:8px 0; }
+
+  .trick-area { display:flex; gap:8px; justify-content:center; align-items:center; min-height:90px; padding:8px; width:100%; }
+  .trick-card-slot { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .trick-card-slot .slot-name { font-size:0.7em; color:var(--white-dim); font-weight:700; }
+  .trick-card-slot .card { cursor:default; }
+
+  .info-bar { display:flex; justify-content:space-between; align-items:center; width:100%; max-width:400px; padding:6px 12px; background:rgba(0,0,0,0.3); border-radius:10px; font-size:0.8em; }
+  .info-bar .trump-label { color:var(--gold); font-weight:800; }
+  .score-display { font-weight:700; }
+
+  .bid-buttons { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .bid-btn { font-family:'Nunito',sans-serif; font-weight:800; font-size:1.1em; width:56px; height:56px; border-radius:50%; border:3px solid rgba(255,255,255,0.15); background:var(--surface); color:var(--white); cursor:pointer; transition:all 0.15s; }
+  .bid-btn:active { transform:scale(0.9); }
+  .bid-btn.pass-btn { border-radius:var(--radius); width:auto; height:auto; padding:12px 24px; background:rgba(200,60,60,0.3); border-color:var(--red); color:var(--red); }
+  .bid-btn:disabled { opacity:0.3; pointer-events:none; }
+
+  .suit-buttons { display:flex; gap:12px; justify-content:center; }
+  .suit-btn { width:64px; height:64px; border-radius:12px; border:3px solid rgba(255,255,255,0.1); background:var(--surface); font-size:2em; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; }
+  .suit-btn:active { transform:scale(0.9); }
+
+  .result-box { background:var(--surface); border-radius:var(--radius); padding:16px; width:100%; max-width:340px; text-align:center; }
+  .result-title { font-family:'Alfa Slab One',serif; font-size:1.3em; margin-bottom:8px; }
+  .result-made { color:var(--gold); }
+  .result-set { color:var(--red); }
+  .result-row { display:flex; justify-content:space-between; padding:4px 0; font-weight:700; font-size:0.9em; }
+  .result-row .label { color:var(--white-dim); }
+
+  .status-msg { font-weight:700; color:var(--gold); text-align:center; font-size:1em; min-height:1.4em; animation:pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.6;} }
+
+  .play-btn-area { padding:8px 0; }
+  .toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--red); color:#fff; padding:10px 20px; border-radius:10px; font-weight:700; font-size:0.9em; z-index:999; animation:toastIn 0.3s ease-out; text-align:center; max-width:90%; }
+  @keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
+  .discard-counter { font-family:'Alfa Slab One',serif; font-size:1.2em; padding:8px 16px; border-radius:10px; background:rgba(0,0,0,0.3); }
+  .discard-counter.ready { color:var(--gold); }
+  .discard-counter.not-ready { color:var(--red); }
+
+  /* ── Scorecard ───────────────────────── */
+  .scorecard { background:rgba(0,0,0,0.25); border-radius:10px; padding:10px; margin:6px 0; }
+  .scorecard-title { font-weight:800; font-size:0.9em; color:var(--gold); margin-bottom:6px; text-align:center; }
+  .scorecard-row { display:flex; justify-content:space-between; align-items:center; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,0.05); font-size:0.85em; }
+  .scorecard-row:last-child { border-bottom:none; }
+  .scorecard-label { font-weight:700; }
+  .scorecard-value { font-weight:700; display:flex; align-items:center; gap:6px; }
+  .scorecard-check { font-size:1.1em; }
+  .scorecard-check.won { color:var(--gold); }
+  .scorecard-check.lost { color:var(--white-dim); opacity:0.4; }
+  .scorecard-who { font-size:0.8em; color:var(--white-dim); }
+  .scorecard-card { display:inline-block; padding:2px 6px; border-radius:4px; background:#fff; font-weight:800; font-size:0.8em; margin-left:4px; }
+  .scorecard-card.red { color:var(--red); }
+  .scorecard-card.black { color:var(--black); }
+  .scorecard-card.joker-card { background:linear-gradient(135deg,#9b30ff,#ff6090); color:#fff; }
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div class="screen active" id="screen-home">
+  <h1>🃏 Setback</h1>
+  <p class="sub">6-Point Pitch</p>
+  <div class="gap"></div>
+  <input type="text" id="player-name" placeholder="Your name" maxlength="16" autocomplete="off">
+  <div class="gap"></div>
+  <select id="player-count">
+    <option value="2">2 Players (head to head)</option>
+    <option value="4">4 Players (teams of 2)</option>
+  </select>
+  <div class="gap"></div>
+  <button class="btn btn-gold" onclick="createRoom()">Create Game</button>
+  <div class="or-div">— or —</div>
+  <input type="text" id="join-code" placeholder="Enter room code" maxlength="12" autocomplete="off" style="text-transform:uppercase">
+  <button class="btn btn-green" onclick="joinRoom()">Join Game</button>
+  <p class="error" id="home-error"></p>
+</div>
+
+<!-- LOBBY -->
+<div class="screen" id="screen-lobby">
+  <h1>🃏 Lobby</h1>
+  <div class="room-code" id="lobby-code"></div>
+  <p class="sub">Share this code!</p>
+  <div class="gap"></div>
+  <p class="sub" id="lobby-mode"></p>
+  <ul class="player-list" id="lobby-players"></ul>
+  <p class="sub" id="lobby-waiting"></p>
+  <button class="btn btn-gold" id="start-btn" onclick="startGame()" style="display:none">Deal 'em!</button>
+</div>
+
+<!-- BIDDING -->
+<div class="screen" id="screen-bid">
+  <div class="info-bar">
+    <span class="score-display" id="bid-scores"></span>
+    <span class="sub" id="bid-dealer"></span>
+  </div>
+  <p class="sub" id="bid-kitty-info" style="color:var(--gold)"></p>
+  <p class="sub" id="bid-status"></p>
+  <div class="hand-area" id="bid-hand"></div>
+  <div id="bid-controls" style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+    <p class="sub">Your bid:</p>
+    <div class="bid-buttons" id="bid-buttons"></div>
+  </div>
+  <p class="status-msg" id="bid-waiting" style="display:none"></p>
+</div>
+
+<!-- TRUMP SELECTION -->
+<div class="screen" id="screen-trump">
+  <h2>Pick Trump</h2>
+  <p class="sub" id="trump-info"></p>
+  <div class="suit-buttons">
+    <button class="suit-btn" onclick="selectTrump('hearts')">♥️</button>
+    <button class="suit-btn" onclick="selectTrump('diamonds')">♦️</button>
+    <button class="suit-btn" onclick="selectTrump('clubs')">♣️</button>
+    <button class="suit-btn" onclick="selectTrump('spades')">♠️</button>
+  </div>
+  <div class="hand-area" id="trump-hand"></div>
+</div>
+
+<!-- WAITING FOR TRUMP -->
+<div class="screen" id="screen-wait-trump">
+  <h2>Trump Selection</h2>
+  <p class="status-msg" id="wait-trump-msg"></p>
+  <div class="hand-area" id="wait-trump-hand"></div>
+</div>
+
+<!-- DISCARD PHASE -->
+<div class="screen" id="screen-discard">
+  <h2 id="discard-title">Pick Your Cards</h2>
+  <p class="sub" id="discard-msg"></p>
+  <p class="sub" id="discard-trump-label"></p>
+  <div class="discard-counter not-ready" id="discard-counter">0 / 6 selected</div>
+  <div class="hand-area" id="discard-hand"></div>
+  <button class="btn btn-gold" id="discard-btn" onclick="submitDiscards()" disabled>Keep Selected (0/6)</button>
+</div>
+
+<!-- WAIT DISCARD -->
+<div class="screen" id="screen-wait-discard">
+  <h2>Waiting...</h2>
+  <p class="status-msg" id="wait-discard-msg"></p>
+</div>
+
+<!-- PLAYING -->
+<div class="screen" id="screen-play">
+  <div class="info-bar">
+    <span class="score-display" id="play-scores"></span>
+    <span class="trump-label" id="play-trump"></span>
+    <span class="sub" id="play-bid-info"></span>
+  </div>
+  <p class="status-msg" id="play-status"></p>
+  <div class="trick-area" id="trick-area"></div>
+  <div class="hand-area" id="play-hand"></div>
+  <div class="play-btn-area">
+    <button class="btn btn-gold btn-sm" id="play-card-btn" onclick="playSelectedCard()" style="display:none">Play Card</button>
+  </div>
+</div>
+
+<!-- TRICK RESULT -->
+<div class="screen" id="screen-trick-result">
+  <h2 id="trick-winner-text"></h2>
+  <div class="trick-area" id="trick-result-cards"></div>
+</div>
+
+<!-- HAND RESULT -->
+<div class="screen" id="screen-result">
+  <div class="result-box">
+    <div class="result-title" id="result-title"></div>
+    <div id="result-details"></div>
+    <div class="gap"></div>
+    <div id="result-scores"></div>
+  </div>
+  <div class="gap"></div>
+  <button class="btn btn-gold" id="result-btn" onclick="nextHand()">Next Hand</button>
+</div>
+
+<!-- GAME OVER -->
+<div class="screen" id="screen-gameover">
+  <h1>🏆</h1>
+  <h1 id="gameover-text"></h1>
+  <div class="result-box" id="gameover-scores"></div>
+  <button class="btn btn-gold" onclick="location.reload()">New Game</button>
+</div>
+
+<!-- DISCONNECTED -->
+<div class="screen" id="screen-dc">
+  <h1>💔</h1>
+  <p class="sub" id="dc-msg"></p>
+  <button class="btn btn-gold" onclick="location.reload()">Back to Home</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+var socket = io();
+var roomCode = null;
+var isHost = false;
+var myIndex = -1;
+var myHand = [];
+var selectedCardId = null;
+var gameState = null;
+
+var discardSelected = {};
+var discardIsBidWinner = false;
+var discardHand = [];
+
+var SUIT_SYMBOLS = { hearts:'♥', diamonds:'♦', clubs:'♣', spades:'♠', joker:'★' };
+var SUIT_COLORS = { hearts:'red', diamonds:'red', clubs:'black', spades:'black', joker:'joker' };
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+}
+
+function showToast(msg) {
+  var old = document.querySelector('.toast');
+  if (old) old.remove();
+  var t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { t.remove(); }, 3000);
+}
+
+// ── Card rendering ────────────────────────
+function renderCard(card, opts) {
+  opts = opts || {};
+  var div = document.createElement('div');
+  div.className = 'card';
+  if (card.rank === 'Joker') {
+    div.classList.add('joker-card');
+    div.innerHTML = '<span class="card-rank">JKR</span><span class="card-suit">★</span>';
+  } else {
+    var color = SUIT_COLORS[card.suit] || 'black';
+    div.classList.add(color);
+    div.innerHTML = '<span class="card-rank">' + card.rank + '</span><span class="card-suit">' + SUIT_SYMBOLS[card.suit] + '</span>';
+  }
+  div.setAttribute('data-id', card.rank + '_' + card.suit);
+  if (opts.selectable) {
+    div.onclick = function() { toggleCard(div, card); };
+  }
+  if (opts.discardSelectable) {
+    div.onclick = function() { toggleDiscardCard(div, card); };
+  }
+  if (opts.disabled) div.classList.add('disabled');
+  if (opts.small) { div.style.width='46px'; div.style.height='66px'; div.style.fontSize='0.85em'; }
+  return div;
+}
+
+function toggleCard(el, card) {
+  var id = card.rank + '_' + card.suit;
+  if (selectedCardId === id) {
+    el.classList.remove('selected');
+    selectedCardId = null;
+    document.getElementById('play-card-btn').style.display = 'none';
+  } else {
+    document.querySelectorAll('#play-hand .card').forEach(function(c) { c.classList.remove('selected'); });
+    el.classList.add('selected');
+    selectedCardId = id;
+    document.getElementById('play-card-btn').style.display = '';
+  }
+}
+
+function sortHand(hand) {
+  return hand.slice().sort(function(a, b) {
+    if (a.rank === 'Joker') return -1;
+    if (b.rank === 'Joker') return 1;
+    var suitOrder = ['hearts','diamonds','clubs','spades'];
+    var si = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
+    if (si !== 0) return si;
+    var ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+    return ranks.indexOf(b.rank) - ranks.indexOf(a.rank);
+  });
+}
+
+function renderHandTo(containerId, hand, opts) {
+  var el = document.getElementById(containerId);
+  el.innerHTML = '';
+  var sorted = sortHand(hand);
+  for (var i = 0; i < sorted.length; i++) {
+    el.appendChild(renderCard(sorted[i], opts));
+  }
+}
+
+function formatScores(scores, players, maxPlayers) {
+  if (maxPlayers === 4) {
+    return players[0]+'/'+players[2]+': '+(scores[0]||0)+' | '+players[1]+'/'+players[3]+': '+(scores[1]||0);
+  }
+  return players[0]+': '+(scores[0]||0)+' | '+players[1]+': '+(scores[1]||0);
+}
+
+function teamName(teamIdx, players, maxPlayers) {
+  if (maxPlayers === 4) return players[teamIdx] + ' & ' + players[teamIdx + 2];
+  return players[teamIdx];
+}
+
+// ── Home ──────────────────────────────────
+function createRoom() {
+  var name = document.getElementById('player-name').value.trim() || 'Player 1';
+  var maxP = parseInt(document.getElementById('player-count').value);
+  document.getElementById('home-error').textContent = '';
+  socket.emit('create-room', { name:name, maxPlayers:maxP }, function(res) {
+    if (res.success) {
+      roomCode = res.code; isHost = true; myIndex = 0;
+      document.getElementById('lobby-code').textContent = res.code;
+      document.getElementById('lobby-mode').textContent = maxP + '-player game';
+      showScreen('screen-lobby');
+      updateLobby([name], maxP);
+    } else {
+      document.getElementById('home-error').textContent = res.error;
+    }
+  });
+}
+
+function joinRoom() {
+  var name = document.getElementById('player-name').value.trim() || 'Player';
+  var code = document.getElementById('join-code').value.trim().toUpperCase();
+  document.getElementById('home-error').textContent = '';
+  if (!code) { document.getElementById('home-error').textContent = 'Enter a room code!'; return; }
+  socket.emit('join-room', { code:code, name:name }, function(res) {
+    if (res.success) {
+      roomCode = res.code; isHost = false; myIndex = res.playerIndex;
+      document.getElementById('lobby-code').textContent = res.code;
+      showScreen('screen-lobby');
+    } else {
+      document.getElementById('home-error').textContent = res.error;
+    }
+  });
+}
+
+function updateLobby(players, maxPlayers) {
+  var list = document.getElementById('lobby-players');
+  list.innerHTML = '';
+  for (var i = 0; i < players.length; i++) {
+    var li = document.createElement('li');
+    li.textContent = players[i] + (i === 0 ? ' (host)' : '');
+    list.appendChild(li);
+  }
+  document.getElementById('lobby-waiting').textContent = (maxPlayers - players.length) > 0 ? 'Waiting for ' + (maxPlayers - players.length) + ' more...' : 'Everyone is here!';
+  document.getElementById('lobby-mode').textContent = maxPlayers + '-player game' + (maxPlayers === 4 ? ' (teams)' : '');
+  document.getElementById('start-btn').style.display = (isHost && players.length === maxPlayers) ? '' : 'none';
+}
+
+socket.on('lobby-update', function(data) { updateLobby(data.players, data.maxPlayers); });
+
+function startGame() {
+  socket.emit('start-game', { code: roomCode });
+}
+
+// ── New hand / Bidding ────────────────────
+socket.on('new-hand', function(data) {
+  myIndex = data.playerIndex;
+  myHand = data.hand;
+  document.getElementById('bid-scores').textContent = formatScores(data.scores, data.players, data.maxPlayers);
+  document.getElementById('bid-dealer').textContent = 'Dealer: ' + data.dealerName;
+  document.getElementById('bid-kitty-info').textContent = '🎴 ' + (data.kittySize || 6) + ' cards in the kitty';
+  renderHandTo('bid-hand', myHand, {});
+
+  if (data.currentBidder === myIndex) {
+    showBidControls(0);
+    document.getElementById('bid-status').textContent = 'Your bid!';
+  } else {
+    document.getElementById('bid-controls').style.display = 'none';
+    document.getElementById('bid-waiting').style.display = '';
+    document.getElementById('bid-waiting').textContent = data.players[data.currentBidder] + ' is bidding...';
+    document.getElementById('bid-status').textContent = 'Waiting for bids...';
+  }
+  showScreen('screen-bid');
+});
+
+function showBidControls(minBid) {
+  var container = document.getElementById('bid-buttons');
+  container.innerHTML = '';
+  for (var b = 3; b <= 6; b++) {
+    var btn = document.createElement('button');
+    btn.className = 'bid-btn'; btn.textContent = b;
+    btn.disabled = b <= minBid;
+    btn.setAttribute('data-bid', b);
+    btn.onclick = function() { placeBid(parseInt(this.getAttribute('data-bid'))); };
+    container.appendChild(btn);
+  }
+  var passBtn = document.createElement('button');
+  passBtn.className = 'bid-btn pass-btn'; passBtn.textContent = 'Pass';
+  passBtn.onclick = function() { placeBid(0); };
+  container.appendChild(passBtn);
+  document.getElementById('bid-controls').style.display = '';
+  document.getElementById('bid-waiting').style.display = 'none';
+}
+
+function placeBid(bid) {
+  socket.emit('place-bid', { code:roomCode, bid:bid });
+  document.getElementById('bid-controls').style.display = 'none';
+  document.getElementById('bid-waiting').style.display = '';
+  document.getElementById('bid-waiting').textContent = 'Waiting for other bids...';
+}
+
+socket.on('bid-placed', function(data) {
+  var msg = data.playerName + (data.forced ? ' stuck with 3' : (data.bid === 0 ? ' passed' : ' bid ' + data.bid));
+  document.getElementById('bid-status').textContent = msg;
+});
+
+socket.on('bidding-turn', function(data) {
+  if (data.currentBidder === myIndex) {
+    showBidControls(data.highBid);
+    var statusMsg = 'Your bid!';
+    if (data.highBid > 0) statusMsg += ' (high: ' + data.highBid + ' by ' + data.highBidderName + ')';
+    document.getElementById('bid-status').textContent = statusMsg;
+  } else {
+    document.getElementById('bid-controls').style.display = 'none';
+    document.getElementById('bid-waiting').style.display = '';
+    document.getElementById('bid-waiting').textContent = 'Waiting for next bid...';
+    if (data.highBid > 0) {
+      document.getElementById('bid-status').textContent = 'High bid: ' + data.highBid + ' by ' + data.highBidderName;
+    }
+  }
+});
+
+// ── Trump selection ───────────────────────
+socket.on('select-trump', function(data) {
+  document.getElementById('trump-info').textContent = 'You won with ' + data.bid + ' — got the kitty! Pick trump:';
+  myHand = data.hand || myHand;
+  renderHandTo('trump-hand', myHand, {});
+  showScreen('screen-trump');
+});
+
+socket.on('waiting-for-trump', function(data) {
+  document.getElementById('wait-trump-msg').textContent = data.bidderName + ' is picking trump (bid ' + data.bid + ')...';
+  renderHandTo('wait-trump-hand', myHand, {});
+  showScreen('screen-wait-trump');
+});
+
+function selectTrump(suit) {
+  socket.emit('select-trump', { code:roomCode, suit:suit });
+}
+
+// ── Discard phase ─────────────────────────
+socket.on('discard-phase', function(data) {
+  discardHand = data.hand;
+  discardIsBidWinner = data.isBidWinner;
+  discardSelected = {};
+
+  var trumpSuit = data.trumpSuit;
+  document.getElementById('discard-title').textContent = data.isBidWinner ? 'You Got the Kitty!' : 'Discard & Draw';
+  document.getElementById('discard-msg').textContent = data.message;
+  document.getElementById('discard-trump-label').innerHTML = 'Trump: <span style="color:var(--gold)">' + SUIT_SYMBOLS[trumpSuit] + ' ' + trumpSuit + '</span>';
+
+  // Reset visibility in case they were hidden from a previous round
+  document.getElementById('discard-btn').style.display = '';
+  document.getElementById('discard-counter').style.display = '';
+
+  // Render cards as selectable for discard
+  var el = document.getElementById('discard-hand');
+  el.innerHTML = '';
+  var sorted = sortHand(discardHand);
+  for (var i = 0; i < sorted.length; i++) {
+    el.appendChild(renderCard(sorted[i], { discardSelectable: true }));
+  }
+
+  updateDiscardCounter();
+  showScreen('screen-discard');
+});
+
+function toggleDiscardCard(el, card) {
+  var id = card.rank + '_' + card.suit;
+  if (discardSelected[id]) {
+    delete discardSelected[id];
+    el.classList.remove('selected');
+  } else {
+    var count = Object.keys(discardSelected).length;
+    if (count >= 6) {
+      showToast('You can only keep 6 cards! Deselect one first.');
+      return;
+    }
+    discardSelected[id] = true;
+    el.classList.add('selected');
+  }
+  updateDiscardCounter();
+}
+
+function updateDiscardCounter() {
+  var count = Object.keys(discardSelected).length;
+  var counter = document.getElementById('discard-counter');
+  var btn = document.getElementById('discard-btn');
+
+  // Both bid winner and others: keep 0-6, draw the rest
+  var drawCount = 6 - count;
+  counter.textContent = count + ' kept, will draw ' + drawCount;
+  counter.className = 'discard-counter ready';
+  btn.disabled = false;
+  btn.textContent = 'Keep ' + count + ', Draw ' + drawCount;
+}
+
+function submitDiscards() {
+  var keepIds = Object.keys(discardSelected);
+
+  // Both bid winner and others can keep 0-6 and draw the rest
+  if (discardIsBidWinner) {
+    socket.emit('submit-discards', { code: roomCode, keepCardIds: keepIds });
+  } else {
+    socket.emit('submit-other-discards', { code: roomCode, keepCardIds: keepIds });
+  }
+
+  document.getElementById('discard-title').textContent = 'Waiting...';
+  document.getElementById('discard-msg').textContent = 'Waiting for other players...';
+  document.getElementById('discard-hand').innerHTML = '';
+  document.getElementById('discard-btn').style.display = 'none';
+  document.getElementById('discard-counter').style.display = 'none';
+}
+
+socket.on('wait-discard', function(data) {
+  document.getElementById('wait-discard-msg').textContent = data.message;
+  showScreen('screen-wait-discard');
+});
+
+socket.on('discard-error', function(data) {
+  showToast(data.message);
+});
+
+// ── Playing ───────────────────────────────
+socket.on('game-state', function(data) {
+  gameState = data;
+  myHand = data.hand;
+  selectedCardId = null;
+
+  document.getElementById('play-scores').textContent = formatScores(data.scores, data.players, data.maxPlayers);
+  document.getElementById('play-trump').textContent = 'Trump: ' + SUIT_SYMBOLS[data.trumpSuit];
+  document.getElementById('play-bid-info').textContent = data.highBidderName + ' bid ' + data.highBid;
+
+  var isMyTurn = data.currentPlayer === myIndex;
+  document.getElementById('play-status').textContent = isMyTurn ? 'Your turn — pick a card!' : data.currentPlayerName + "'s turn...";
+  document.getElementById('play-status').style.animation = isMyTurn ? 'none' : '';
+
+  renderTrickArea(data.trickPlays, data.players);
+  renderHandTo('play-hand', myHand, { selectable: isMyTurn });
+  document.getElementById('play-card-btn').style.display = 'none';
+  showScreen('screen-play');
+});
+
+function renderTrickArea(plays, players) {
+  var area = document.getElementById('trick-area');
+  area.innerHTML = '';
+  for (var i = 0; i < plays.length; i++) {
+    var slot = document.createElement('div');
+    slot.className = 'trick-card-slot';
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'slot-name';
+    nameSpan.textContent = players[plays[i].player];
+    slot.appendChild(renderCard(plays[i].card, { small:true }));
+    slot.appendChild(nameSpan);
+    area.appendChild(slot);
+  }
+}
+
+function playSelectedCard() {
+  if (!selectedCardId) return;
+  socket.emit('play-card', { code:roomCode, cardId:selectedCardId });
+  selectedCardId = null;
+  document.getElementById('play-card-btn').style.display = 'none';
+}
+
+socket.on('card-played', function(data) {});
+
+socket.on('invalid-play', function(data) {
+  showToast(data.message);
+  selectedCardId = null;
+  // Re-render hand so selection is cleared
+  if (gameState) {
+    var isMyTurn = gameState.currentPlayer === myIndex;
+    renderHandTo('play-hand', myHand, { selectable: isMyTurn });
+    document.getElementById('play-card-btn').style.display = 'none';
+  }
+});
+
+// ── Trick result ──────────────────────────
+socket.on('trick-result', function(data) {
+  document.getElementById('trick-winner-text').textContent = data.winnerName + ' takes it!';
+  var area = document.getElementById('trick-result-cards');
+  area.innerHTML = '';
+  for (var i = 0; i < data.cards.length; i++) {
+    area.appendChild(renderCard(data.cards[i].card, { small:true }));
+  }
+  showScreen('screen-trick-result');
+});
+
+// ── Hand result ───────────────────────────
+socket.on('hand-result', function(data) {
+  var bidderTeamName = teamName(data.bidderTeam, data.players, data.maxPlayers);
+  var titleEl = document.getElementById('result-title');
+  if (data.madeIt) {
+    titleEl.className = 'result-title result-made';
+    titleEl.textContent = bidderTeamName + ' made it! (' + data.bid + ')';
+  } else {
+    titleEl.className = 'result-title result-set';
+    titleEl.textContent = bidderTeamName + ' got SET BACK! (−' + data.bid + ')';
+  }
+
+  var details = document.getElementById('result-details');
+  details.innerHTML = '';
+  var numTeams = data.maxPlayers === 4 ? 2 : data.maxPlayers;
+
+  // Build scorecard: 6 possible points
+  var bd = data.breakdown || {};
+  var scorecardHtml = '<div class="scorecard"><div class="scorecard-title">Points Scored This Hand</div>';
+
+  function cardBadge(card) {
+    if (!card) return '';
+    if (card.rank === 'Joker') return '<span class="scorecard-card joker-card">JKR★</span>';
+    var colorClass = (card.suit === 'hearts' || card.suit === 'diamonds') ? 'red' : 'black';
+    var symbols = { hearts:'♥', diamonds:'♦', clubs:'♣', spades:'♠' };
+    return '<span class="scorecard-card ' + colorClass + '">' + card.rank + symbols[card.suit] + '</span>';
+  }
+
+  function pointRow(label, info) {
+    var won = (info && info.team >= 0);
+    var checkClass = won ? 'won' : 'lost';
+    var checkMark = won ? '✓' : '✗';
+    var who = '';
+    if (won) {
+      who = '<span class="scorecard-who">' + teamName(info.team, data.players, data.maxPlayers) + '</span>';
+      if (info.card) who += cardBadge(info.card);
+    } else {
+      who = '<span class="scorecard-who">not taken</span>';
+    }
+    return '<div class="scorecard-row"><span class="scorecard-label">' + label + '</span>' +
+      '<span class="scorecard-value">' + who + '<span class="scorecard-check ' + checkClass + '">' + checkMark + '</span></span></div>';
+  }
+
+  scorecardHtml += pointRow('High', bd.high);
+  scorecardHtml += pointRow('Low', bd.low);
+  scorecardHtml += pointRow('Jack', bd.jack);
+  scorecardHtml += pointRow('Off Jack', bd.offJack);
+  scorecardHtml += pointRow('Joker', bd.joker);
+
+  // Game (special — shows tie or who won)
+  var gameInfo = bd.game || {};
+  var gameWon = (gameInfo.team >= 0);
+  var gameLabel;
+  if (gameInfo.tied) {
+    gameLabel = '<span class="scorecard-who">tied, no point</span>';
+  } else if (gameWon) {
+    gameLabel = '<span class="scorecard-who">' + teamName(gameInfo.team, data.players, data.maxPlayers) + '</span>';
+  } else {
+    gameLabel = '<span class="scorecard-who">not awarded</span>';
+  }
+  var gameCheck = gameWon ? '<span class="scorecard-check won">✓</span>' : '<span class="scorecard-check lost">✗</span>';
+  scorecardHtml += '<div class="scorecard-row"><span class="scorecard-label">Game</span><span class="scorecard-value">' + gameLabel + gameCheck + '</span></div>';
+
+  // Show card points per team for context
+  if (data.gamePoints) {
+    var gpText = [];
+    for (var t = 0; t < numTeams; t++) {
+      gpText.push(teamName(t, data.players, data.maxPlayers) + ': ' + (data.gamePoints[t] || 0));
+    }
+    scorecardHtml += '<div class="scorecard-row" style="font-size:0.75em;opacity:0.7"><span class="scorecard-label">Card points</span><span>' + gpText.join(' · ') + '</span></div>';
+  }
+
+  scorecardHtml += '</div>';
+  details.innerHTML = scorecardHtml;
+
+  // Per-team summary for this hand
+  var handSummary = '<div style="font-weight:800;margin:8px 0 4px;">This Hand</div>';
+  for (var t = 0; t < numTeams; t++) {
+    var tn = teamName(t, data.players, data.maxPlayers);
+    var earned = data.points[t] || 0;
+    var earnedText;
+    if (t === data.bidderTeam && !data.madeIt) {
+      earnedText = '<span style="color:var(--red)">−' + data.bid + ' (set)</span>';
+    } else {
+      earnedText = '<span style="color:var(--gold)">+' + earned + ' pts</span>';
+    }
+    handSummary += '<div class="result-row"><span class="label">' + tn + '</span><span>' + earnedText + '</span></div>';
+  }
+  details.innerHTML += handSummary;
+
+  var scoresEl = document.getElementById('result-scores');
+  scoresEl.innerHTML = '<div style="font-weight:800;margin-bottom:4px;">Total Score (first to 21 wins)</div>';
+  for (var t = 0; t < numTeams; t++) {
+    var tn = teamName(t, data.players, data.maxPlayers);
+    var row = document.createElement('div');
+    row.className = 'result-row';
+    row.innerHTML = '<span class="label">' + tn + '</span><span style="font-size:1.2em;color:var(--gold);font-weight:800">' + (data.scores[t]||0) + '</span>';
+    scoresEl.appendChild(row);
+  }
+
+  if (data.winner >= 0) {
+    document.getElementById('result-btn').style.display = 'none';
+    setTimeout(function() { showGameOver(data); }, 2000);
+  } else {
+    document.getElementById('result-btn').style.display = '';
+  }
+  showScreen('screen-result');
+});
+
+function nextHand() { socket.emit('next-hand', { code:roomCode }); }
+
+function showGameOver(data) {
+  document.getElementById('gameover-text').textContent = teamName(data.winner, data.players, data.maxPlayers) + ' wins!';
+  var scoresEl = document.getElementById('gameover-scores');
+  scoresEl.innerHTML = '';
+  var numTeams = data.maxPlayers === 4 ? 2 : data.maxPlayers;
+  for (var t = 0; t < numTeams; t++) {
+    var row = document.createElement('div');
+    row.className = 'result-row';
+    row.innerHTML = '<span class="label">' + teamName(t, data.players, data.maxPlayers) + '</span><span style="font-size:1.2em;color:var(--gold)">' + (data.scores[t]||0) + '</span>';
+    scoresEl.appendChild(row);
+  }
+  showScreen('screen-gameover');
+}
+
+socket.on('player-left', function(data) {
+  document.getElementById('dc-msg').textContent = data.name + ' disconnected!';
+  showScreen('screen-dc');
+});
+
+document.getElementById('join-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') joinRoom(); });
+</script>
+</body>
+</html>
