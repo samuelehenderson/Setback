@@ -186,6 +186,19 @@
   .mug-fill::after { content:''; position:absolute; right:-1px; top:0; bottom:0; width:7px; background:#fff8e6; border-radius:3px; box-shadow:-2px 0 4px rgba(255,248,230,0.6); }
   .mug-score { font-family:'Alfa Slab One',serif; font-size:1em; color:var(--gold); width:2em; text-align:right; }
 
+  /* ── Invite friends ───────────────────── */
+  .invite-box { display:flex; flex-direction:column; align-items:center; gap:8px;
+    background:rgba(0,0,0,0.28); border:1px solid rgba(255,179,71,0.25);
+    border-radius:var(--radius); padding:14px; width:100%; max-width:280px; }
+  .qr-wrap { background:#fffdf5; padding:8px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,0.45); line-height:0; }
+  .qr-wrap svg { display:block; width:150px; height:150px; }
+  .qr-wrap:empty { display:none; }
+  .invite-btns { display:flex; gap:8px; }
+  .invite-banner { background:linear-gradient(180deg, rgba(245,197,66,0.18), rgba(245,197,66,0.08));
+    border:1px solid rgba(245,197,66,0.45); border-radius:var(--radius); padding:10px 16px;
+    color:var(--gold); font-weight:800; max-width:320px; animation:pulse 2s ease-in-out infinite; }
+  .toast.good { background:linear-gradient(180deg, #ffd77a, var(--amber)); color:#3a2410; }
+
   /* ── Confetti ─────────────────────────── */
   .confetti { position:fixed; top:-24px; width:10px; height:14px; z-index:998; pointer-events:none; border-radius:2px; animation:confettiFall linear forwards; }
   .confetti.emoji { width:auto; height:auto; background:none!important; font-size:1.5em; }
@@ -199,6 +212,7 @@
   <h1>🍺 Setback</h1>
   <p class="tagline">The Classic Taproom Card Game</p>
   <p class="sub">6-Point Pitch · High, Low, Jack &amp; the Joker</p>
+  <p class="sub invite-banner" id="invite-banner" style="display:none"></p>
   <div class="gap"></div>
   <input type="text" id="player-name" placeholder="Your name" maxlength="16" autocomplete="off">
   <div class="gap"></div>
@@ -220,6 +234,14 @@
   <h1>🍻 The Lobby</h1>
   <div class="room-code" id="lobby-code"></div>
   <p class="sub">Pull up a stool — share this code!</p>
+  <div class="invite-box" id="invite-box" style="display:none">
+    <div class="qr-wrap" id="qr-code"></div>
+    <p class="sub" style="font-size:0.8em">Scan with a phone to join instantly</p>
+    <div class="invite-btns">
+      <button class="btn btn-gold btn-sm" onclick="shareInvite()">📨 Invite Friends</button>
+      <button class="btn btn-green btn-sm" onclick="copyInvite()">📋 Copy Link</button>
+    </div>
+  </div>
   <div class="gap"></div>
   <p class="sub" id="lobby-mode"></p>
   <ul class="player-list" id="lobby-players"></ul>
@@ -328,6 +350,7 @@
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="/qrcode.js"></script>
 <script>
 var socket = io();
 var roomCode = null;
@@ -350,14 +373,70 @@ function showScreen(id) {
   document.getElementById(id).classList.add('active');
 }
 
-function showToast(msg) {
+function showToast(msg, good) {
   var old = document.querySelector('.toast');
   if (old) old.remove();
   var t = document.createElement('div');
-  t.className = 'toast';
+  t.className = 'toast' + (good ? ' good' : '');
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(function() { t.remove(); }, 3000);
+}
+
+// ── Invites ───────────────────────────────
+function inviteUrl() {
+  return location.origin + '/?join=' + encodeURIComponent(roomCode);
+}
+
+function renderInvite() {
+  var box = document.getElementById('invite-box');
+  if (!roomCode || isVsComputer) { box.style.display = 'none'; return; }
+  box.style.display = '';
+  var wrap = document.getElementById('qr-code');
+  wrap.innerHTML = '';
+  try {
+    if (typeof qrcode === 'function') {
+      var qr = qrcode(0, 'M');
+      qr.addData(inviteUrl());
+      qr.make();
+      wrap.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2 });
+    }
+  } catch (e) { wrap.innerHTML = ''; }
+}
+
+function fallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+}
+
+function copyInvite() {
+  var url = inviteUrl();
+  var done = function() { showToast('Invite link copied! 🍻', true); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done, function() { fallbackCopy(url); done(); });
+  } else {
+    fallbackCopy(url);
+    done();
+  }
+}
+
+function shareInvite() {
+  var url = inviteUrl();
+  if (navigator.share) {
+    navigator.share({
+      title: 'Setback',
+      text: '🍺 Pull up a stool! Join my Setback game — room code ' + roomCode,
+      url: url
+    }).catch(function() {});
+  } else {
+    copyInvite();
+  }
 }
 
 // ── Card rendering ────────────────────────
@@ -471,6 +550,7 @@ function createRoom() {
       } else {
         document.getElementById('lobby-code').textContent = res.code;
         document.getElementById('lobby-mode').textContent = maxP + '-player game';
+        renderInvite();
         showScreen('screen-lobby');
         updateLobby([name], maxP);
       }
@@ -489,6 +569,7 @@ function joinRoom() {
     if (res.success) {
       roomCode = res.code; isHost = false; myIndex = res.playerIndex;
       document.getElementById('lobby-code').textContent = res.code;
+      renderInvite();
       showScreen('screen-lobby');
     } else {
       document.getElementById('home-error').textContent = res.error;
@@ -948,6 +1029,20 @@ socket.on('player-left', function(data) {
 });
 
 document.getElementById('join-code').addEventListener('keyup', function(e) { if (e.key === 'Enter') joinRoom(); });
+
+// ── Invite links (?join=CODE) ─────────────
+(function() {
+  var params = new URLSearchParams(location.search);
+  var code = params.get('join');
+  if (code) {
+    code = code.toUpperCase();
+    document.getElementById('join-code').value = code;
+    var banner = document.getElementById('invite-banner');
+    banner.style.display = '';
+    banner.textContent = "🍻 You're invited to room " + code + "! Enter your name and tap Join Game.";
+    document.getElementById('player-name').focus();
+  }
+})();
 
 // ── Sound Effects (Web Audio API) ─────────
 var audioCtx = null;
