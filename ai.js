@@ -154,9 +154,12 @@ function aiBid(hand, highBid, isDealer, allPassed, difficulty) {
     if (hasDeuce) sure += 0.6;                     // Low, if we can capture it ourselves
     if (trumpCount >= 4) sure += 1;                // trump control usually means Game
     else if (trumpCount >= 3) sure += 0.5;
-    var worth = Math.min(6, Math.floor(sure + 0.25));
+    // Nanny bids aggressively: full value rounded up, never the minimum,
+    // and with a big hand she goes straight for 6 — she loved 6 and out.
+    var worth = Math.min(6, Math.ceil(sure));
+    if (sure >= 4.5) worth = 6;
     if (worth < 3 || worth <= highBid) return 0;
-    return Math.min(Math.max(3, highBid + 1), worth);
+    return worth;
   }
 
   // Medium (default): decide based on estimated points with some randomness
