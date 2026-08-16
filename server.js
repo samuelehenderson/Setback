@@ -280,7 +280,7 @@ io.on('connection', function(socket) {
     while (rooms[code]) code = generateRoomCode();
     var maxPlayers = parseInt(data.maxPlayers) || 2;
     var vsComputer = data.vsComputer || false;
-    var difficulty = (data.difficulty === 'easy' || data.difficulty === 'hard') ? data.difficulty : 'medium';
+    var difficulty = (['easy', 'hard', 'expert'].indexOf(data.difficulty) !== -1) ? data.difficulty : 'medium';
 
     rooms[code] = {
       code: code,
@@ -309,7 +309,7 @@ io.on('connection', function(socket) {
 
     // If vs computer, add AI player immediately
     if (vsComputer) {
-      var aiNames = { easy: '🤖 Rookie', medium: '🤖 Computer', hard: '🤖 Brewmaster' };
+      var aiNames = { easy: '🤖 Rookie', medium: '🤖 Computer', hard: '🤖 Brewmaster', expert: '👵 Nanny' };
       rooms[code].players.push({ id: 'AI_PLAYER', name: aiNames[difficulty], isAI: true });
       if (maxPlayers === 2) rooms[code].scores = { 0: 0, 1: 0 };
     }
@@ -570,6 +570,8 @@ io.on('connection', function(socket) {
       for (var i = 0; i < room.trickPlays.length; i++) {
         room.tricksWon[winnerTeam].push(room.trickPlays[i].card);
       }
+      if (!room.playedTricks) room.playedTricks = [];
+      room.playedTricks.push({ winner: winner, plays: room.trickPlays.slice() });
 
       console.log(room.players[winner].name + ' wins trick');
 
@@ -735,7 +737,10 @@ function handleAIPlayCard(room) {
   setTimeout(function() {
     var hand = room.hands[pIdx];
     var isLeading = (room.trickPlays.length === 0);
-    var chosenId = ai.aiPlayCard(hand, room.trickPlays, room.trumpSuit, isLeading, room.difficulty);
+    var chosenId = ai.aiPlayCard(hand, room.trickPlays, room.trumpSuit, isLeading, room.difficulty, {
+      playedTricks: room.playedTricks || [],
+      myIndex: pIdx
+    });
 
     if (!chosenId && hand.length > 0) chosenId = cardId(hand[0]);
     if (!chosenId) return;
@@ -764,6 +769,8 @@ function handleAIPlayCard(room) {
       for (var i = 0; i < room.trickPlays.length; i++) {
         room.tricksWon[winnerTeam].push(room.trickPlays[i].card);
       }
+      if (!room.playedTricks) room.playedTricks = [];
+      room.playedTricks.push({ winner: winner, plays: room.trickPlays.slice() });
 
       io.to(room.code).emit('trick-result', {
         winner: winner,
@@ -818,6 +825,7 @@ function startNewHand(room) {
   room.trumpSuit = null;
   room.trickPlays = [];
   room.tricksWon = {};
+  room.playedTricks = [];
   room.discardsDone = {};
 
   room.currentBidder = (room.dealer + 1) % room.maxPlayers;

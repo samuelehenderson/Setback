@@ -3,6 +3,9 @@
 //   easy   — timid bidder, plays mostly random legal cards
 //   medium — decent decisions but not perfect (the original AI)
 //   hard   — bids accurately, strips trump, saves winners, dumps junk
+//   expert — "Nanny": everything hard does, plus she counts every card
+//            played, detects when you're out of trump, protects her low
+//            trump for the Low point, and never feeds you her Jacks
 
 var SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
 var RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
@@ -126,6 +129,36 @@ function aiBid(hand, highBid, isDealer, allPassed, difficulty) {
     return Math.min(bid, worth);
   }
 
+  if (difficulty === 'expert') {
+    // Count near-certain points in the best suit. In this variant the
+    // Joker is both the highest trump and its own point, so it's worth 2.
+    var best = eval_.bestSuit;
+    var sure = 0;
+    var trumpCount = 0, hasJoker = false, hasAce = false, hasJack = false, hasOffJack = false, hasDeuce = false;
+    for (var i = 0; i < hand.length; i++) {
+      var c = hand[i];
+      if (c.rank === 'Joker') { hasJoker = true; trumpCount++; continue; }
+      if (c.suit === best) {
+        trumpCount++;
+        if (c.rank === 'A') hasAce = true;
+        if (c.rank === 'J') hasJack = true;
+        if (c.rank === '2') hasDeuce = true;
+      } else if (c.rank === 'J' && suitColor(c.suit) === suitColor(best)) {
+        hasOffJack = true; trumpCount++;
+      }
+    }
+    if (hasJoker) sure += 2;                       // High + Joker
+    else if (hasAce) sure += 0.9;                  // High unless the Joker is out against us
+    if (hasJack) sure += trumpCount >= 3 ? 0.8 : 0.5;
+    if (hasOffJack) sure += trumpCount >= 3 ? 0.8 : 0.5;
+    if (hasDeuce) sure += 0.6;                     // Low, if we can capture it ourselves
+    if (trumpCount >= 4) sure += 1;                // trump control usually means Game
+    else if (trumpCount >= 3) sure += 0.5;
+    var worth = Math.min(6, Math.floor(sure + 0.25));
+    if (worth < 3 || worth <= highBid) return 0;
+    return Math.min(Math.max(3, highBid + 1), worth);
+  }
+
   // Medium (default): decide based on estimated points with some randomness
   var bid = 0;
   if (eval_.estimatedPoints >= 5) bid = 5;
@@ -199,7 +232,7 @@ function aiDiscard(hand, trumpSuit, isBidWinner, difficulty) {
 }
 
 // ── AI: Play a card ─────────────────────────────────────
-function aiPlayCard(hand, trickPlays, trumpSuit, isLeading, difficulty) {
+function aiPlayCard(hand, trickPlays, trumpSuit, isLeading, difficulty, context) {
   if (hand.length === 0) return null;
   if (hand.length === 1) return cardId(hand[0]);
 
@@ -225,6 +258,10 @@ function aiPlayCard(hand, trickPlays, trumpSuit, isLeading, difficulty) {
 
   if (difficulty === 'hard') {
     return aiPlayCardHard(hand, trickPlays, trumpSuit, isLeading, trumpCards, nonTrumpCards);
+  }
+
+  if (difficulty === 'expert') {
+    return aiPlayCardExpert(hand, trickPlays, trumpSuit, isLeading, trumpCards, nonTrumpCards, context || {});
   }
 
   if (isLeading) {
@@ -417,6 +454,200 @@ function aiPlayCardHard(hand, trickPlays, trumpSuit, isLeading, trumpCards, nonT
   var junk = throwables[0];
   for (var i = 0; i < throwables.length; i++) {
     if (gamePoints(throwables[i]) === 0) { junk = throwables[i]; break; }
+  }
+  return cardId(junk);
+}
+
+// ── Expert AI card play ("Nanny") ───────────────────────
+// Builds on the hard AI with a memory of every card played this hand.
+function aiPlayCardExpert(hand, trickPlays, trumpSuit, isLeading, trumpCards, nonTrumpCards, context) {
+  var playedTricks = context.playedTricks || [];
+  var myIndex = context.myIndex;
+
+  var byTrumpAsc = function(a, b) { return trumpPower(a, trumpSuit) - trumpPower(b, trumpSuit); };
+  var byPlainAsc = function(a, b) { return plainPower(a) - plainPower(b); };
+
+  function gamePoints(card) {
+    var r = card.rank;
+    if (r === '10') return 10;
+    if (r === 'A') return 4;
+    if (r === 'K') return 3;
+    if (r === 'Q') return 2;
+    if (r === 'J') return 1;
+    return 0;
+  }
+
+  // ── Memory: everything seen so far ──
+  var played = [];
+  var oppVoidTrump = false;
+  var oppVoidSuit = {};
+  for (var t = 0; t < playedTricks.length; t++) {
+    var plays = playedTricks[t].plays;
+    var leadES = effectiveSuit(plays[0].card, trumpSuit);
+    for (var p = 0; p < plays.length; p++) {
+      played.push(plays[p].card);
+      if (plays[p].playerIndex !== myIndex) {
+        var es = effectiveSuit(plays[p].card, trumpSuit);
+        if (es !== leadES) {
+          // Playing trump is always legal, so only a non-trump off-suit
+          // card proves a void in the led suit. On a trump lead, any
+          // non-trump card proves they're out of trump.
+          if (leadES === trumpSuit) oppVoidTrump = true;
+          else if (!isTrump(plays[p].card, trumpSuit)) oppVoidSuit[leadES] = true;
+        }
+      }
+    }
+  }
+  for (var i = 0; i < trickPlays.length; i++) played.push(trickPlays[i].card);
+
+  function seen(rank, suit) {
+    for (var i = 0; i < played.length; i++) {
+      if (played[i].rank === rank && played[i].suit === suit) return true;
+    }
+    for (var i = 0; i < hand.length; i++) {
+      if (hand[i].rank === rank && hand[i].suit === suit) return true;
+    }
+    return false;
+  }
+
+  // All 15 trump: 13 of the suit, the off-jack, and the Joker
+  function unseenTrumpPowers() {
+    var out = [];
+    if (!seen('Joker', 'joker')) out.push(14);
+    for (var r = 0; r < RANKS.length; r++) {
+      if (!seen(RANKS[r], trumpSuit)) out.push(trumpPower({ rank: RANKS[r], suit: trumpSuit }, trumpSuit));
+    }
+    for (var s = 0; s < SUITS.length; s++) {
+      if (SUITS[s] !== trumpSuit && suitColor(SUITS[s]) === suitColor(trumpSuit) && !seen('J', SUITS[s])) {
+        out.push(9); // off-jack
+      }
+    }
+    return out;
+  }
+  var unseenTrump = unseenTrumpPowers();
+  if (unseenTrump.length === 0) oppVoidTrump = true;
+
+  // Is this side-suit card unbeatable by anything unseen in its suit?
+  function isBossSideCard(c) {
+    for (var r = RANKS.indexOf(c.rank) + 1; r < RANKS.length; r++) {
+      if (RANKS[r] === 'J' && suitColor(c.suit) === suitColor(trumpSuit) && c.suit !== trumpSuit) continue; // that J is trump
+      if (!seen(RANKS[r], c.suit)) return false;
+    }
+    return true;
+  }
+
+  // How much does losing this card to the opponent's trick hurt?
+  function surrenderCost(c) {
+    var cost = gamePoints(c);
+    if (c.rank === 'J' && isTrump(c, trumpSuit)) cost += 8;      // Jack / Off-Jack point walks away
+    if (isTrump(c, trumpSuit) && isMyLowestUnseenTrump(c)) cost += 5; // hands them the Low point
+    return cost;
+  }
+  function isMyLowestUnseenTrump(c) {
+    if (!isTrump(c, trumpSuit) || c.rank === 'Joker') return false;
+    var myPower = trumpPower(c, trumpSuit);
+    for (var i = 0; i < unseenTrump.length; i++) {
+      if (unseenTrump[i] < myPower) return false;
+    }
+    return true;
+  }
+
+  trumpCards.sort(byTrumpAsc);
+  nonTrumpCards.sort(byPlainAsc);
+
+  if (isLeading) {
+    // Opponent out of trump: bank the Low with our lowest trump, then
+    // cash boss cards — nothing can stop any of it.
+    if (oppVoidTrump) {
+      if (trumpCards.length > 0) return cardId(trumpCards[0]);
+      for (var i = nonTrumpCards.length - 1; i >= 0; i--) {
+        if (isBossSideCard(nonTrumpCards[i])) return cardId(nonTrumpCards[i]);
+      }
+      return cardId(nonTrumpCards[nonTrumpCards.length - 1]);
+    }
+    // Holding the boss trump with depth: lead it to strip their trump
+    if (trumpCards.length >= 2) {
+      var top = trumpCards[trumpCards.length - 1];
+      var topPower = trumpPower(top, trumpSuit);
+      var beatsAllUnseen = true;
+      for (var i = 0; i < unseenTrump.length; i++) {
+        if (unseenTrump[i] > topPower) { beatsAllUnseen = false; break; }
+      }
+      if (beatsAllUnseen) return cardId(top);
+    }
+    // Cash a boss side card in a suit they can still follow
+    for (var i = nonTrumpCards.length - 1; i >= 0; i--) {
+      var c = nonTrumpCards[i];
+      if (isBossSideCard(c) && !oppVoidSuit[c.suit]) return cardId(c);
+    }
+    // Lead junk, preferring cards that cost nothing if captured
+    if (nonTrumpCards.length > 0) {
+      var junk = nonTrumpCards[0];
+      for (var i = 0; i < nonTrumpCards.length; i++) {
+        if (surrenderCost(nonTrumpCards[i]) < surrenderCost(junk)) junk = nonTrumpCards[i];
+      }
+      return cardId(junk);
+    }
+    // Only trump left and none are boss: lead our highest to fight for
+    // control, never the one that would be the Low
+    for (var i = trumpCards.length - 1; i >= 0; i--) {
+      if (!isMyLowestUnseenTrump(trumpCards[i]) || i === 0) return cardId(trumpCards[i]);
+    }
+    return cardId(trumpCards[trumpCards.length - 1]);
+  }
+
+  // ── Following ──
+  var leadSuit = effectiveSuit(trickPlays[0].card, trumpSuit);
+  var followCards = [];
+  for (var i = 0; i < hand.length; i++) {
+    if (effectiveSuit(hand[i], trumpSuit) === leadSuit) followCards.push(hand[i]);
+  }
+
+  var trickValue = 0;
+  var bestPower = -1;
+  for (var i = 0; i < trickPlays.length; i++) {
+    trickValue += gamePoints(trickPlays[i].card);
+    var tp;
+    if (isTrump(trickPlays[i].card, trumpSuit)) tp = 100 + trumpPower(trickPlays[i].card, trumpSuit);
+    else if (effectiveSuit(trickPlays[i].card, trumpSuit) === leadSuit) tp = plainPower(trickPlays[i].card);
+    else tp = -1;
+    if (tp > bestPower) bestPower = tp;
+  }
+
+  if (followCards.length > 0) {
+    var isTrumpLead = (leadSuit === trumpSuit);
+    followCards.sort(isTrumpLead ? byTrumpAsc : byPlainAsc);
+    var powerOf = function(c) {
+      return isTrumpLead ? 100 + trumpPower(c, trumpSuit) : plainPower(c);
+    };
+    // Win with the cheapest winner
+    for (var i = 0; i < followCards.length; i++) {
+      if (powerOf(followCards[i]) > bestPower) return cardId(followCards[i]);
+    }
+    // Forced to lose: surrender the card that costs the least
+    var cheapest = followCards[0];
+    for (var i = 0; i < followCards.length; i++) {
+      if (surrenderCost(followCards[i]) < surrenderCost(cheapest)) cheapest = followCards[i];
+    }
+    return cardId(cheapest);
+  }
+
+  // Can't follow suit. If our lowest trump can take the trick outright
+  // (no trump in it yet), grab it — that locks up the Low point.
+  if (trumpCards.length > 0 && bestPower < 100) {
+    if (isMyLowestUnseenTrump(trumpCards[0])) return cardId(trumpCards[0]);
+  }
+  // Trump whenever the trick carries game points
+  if (trumpCards.length > 0 && trickValue >= 1) {
+    for (var i = 0; i < trumpCards.length; i++) {
+      if (100 + trumpPower(trumpCards[i], trumpSuit) > bestPower) return cardId(trumpCards[i]);
+    }
+  }
+  // Sluff the cheapest surrender
+  var throwables = nonTrumpCards.length > 0 ? nonTrumpCards : trumpCards;
+  var junk = throwables[0];
+  for (var i = 0; i < throwables.length; i++) {
+    if (surrenderCost(throwables[i]) < surrenderCost(junk)) junk = throwables[i];
   }
   return cardId(junk);
 }

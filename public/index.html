@@ -225,6 +225,7 @@
     <option value="easy">🍼 Easy — The Rookie</option>
     <option value="medium" selected>🍺 Medium — The Regular</option>
     <option value="hard">🔥 Hard — The Brewmaster</option>
+    <option value="expert">👵 Expert — Nanny</option>
   </select>
   <div class="gap"></div>
   <button class="btn btn-gold" onclick="createRoom()">Start Game</button>
@@ -547,7 +548,7 @@ function createRoom() {
 
       if (isVsComputer) {
         // Skip lobby, go straight to game
-        var aiNames = { easy: '🤖 Rookie', medium: '🤖 Computer', hard: '🤖 Brewmaster' };
+        var aiNames = { easy: '🤖 Rookie', medium: '🤖 Computer', hard: '🤖 Brewmaster', expert: '👵 Nanny' };
         document.getElementById('lobby-code').textContent = res.code;
         showScreen('screen-lobby');
         updateLobby([name, aiNames[difficulty] || '🤖 Computer'], 2);
