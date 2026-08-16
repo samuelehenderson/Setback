@@ -280,11 +280,13 @@ io.on('connection', function(socket) {
     while (rooms[code]) code = generateRoomCode();
     var maxPlayers = parseInt(data.maxPlayers) || 2;
     var vsComputer = data.vsComputer || false;
+    var difficulty = (data.difficulty === 'easy' || data.difficulty === 'hard') ? data.difficulty : 'medium';
 
     rooms[code] = {
       code: code,
       maxPlayers: maxPlayers,
       vsComputer: vsComputer,
+      difficulty: difficulty,
       players: [{ id: socket.id, name: data.name || 'Player 1' }],
       scores: maxPlayers === 4 ? { 0: 0, 1: 0 } : {},
       phase: 'waiting',
@@ -307,7 +309,8 @@ io.on('connection', function(socket) {
 
     // If vs computer, add AI player immediately
     if (vsComputer) {
-      rooms[code].players.push({ id: 'AI_PLAYER', name: '🤖 Computer', isAI: true });
+      var aiNames = { easy: '🤖 Rookie', medium: '🤖 Computer', hard: '🤖 Brewmaster' };
+      rooms[code].players.push({ id: 'AI_PLAYER', name: aiNames[difficulty], isAI: true });
       if (maxPlayers === 2) rooms[code].scores = { 0: 0, 1: 0 };
     }
 
@@ -637,7 +640,7 @@ function handleAIBid(room) {
     var hand = room.hands[aiIdx];
     var isDealer = (aiIdx === room.dealer);
     var allPassed = room.highBid === 0;
-    var bid = ai.aiBid(hand, room.highBid, isDealer, allPassed);
+    var bid = ai.aiBid(hand, room.highBid, isDealer, allPassed, room.difficulty);
 
     if (bid > 0) {
       room.bids[aiIdx] = bid;
@@ -664,7 +667,7 @@ function handleAITrumpSelection(room) {
   if (!isAIPlayer(room, room.highBidder)) return;
 
   setTimeout(function() {
-    var suit = ai.aiPickTrump(room.hands[room.highBidder]);
+    var suit = ai.aiPickTrump(room.hands[room.highBidder], room.difficulty);
     room.trumpSuit = suit;
     console.log('AI picks trump: ' + suit);
 
@@ -681,7 +684,7 @@ function handleAIDiscard(room, pIdx, isBidWinner) {
 
   setTimeout(function() {
     var hand = room.hands[pIdx];
-    var keepIds = ai.aiDiscard(hand, room.trumpSuit, isBidWinner);
+    var keepIds = ai.aiDiscard(hand, room.trumpSuit, isBidWinner, room.difficulty);
 
     var newHand = [];
     for (var i = 0; i < keepIds.length; i++) {
@@ -732,7 +735,7 @@ function handleAIPlayCard(room) {
   setTimeout(function() {
     var hand = room.hands[pIdx];
     var isLeading = (room.trickPlays.length === 0);
-    var chosenId = ai.aiPlayCard(hand, room.trickPlays, room.trumpSuit, isLeading);
+    var chosenId = ai.aiPlayCard(hand, room.trickPlays, room.trumpSuit, isLeading, room.difficulty);
 
     if (!chosenId && hand.length > 0) chosenId = cardId(hand[0]);
     if (!chosenId) return;

@@ -221,6 +221,11 @@
     <option value="online-4">4 Players (online teams)</option>
     <option value="cpu">vs Computer 🤖</option>
   </select>
+  <select id="cpu-difficulty" style="display:none">
+    <option value="easy">🍼 Easy — The Rookie</option>
+    <option value="medium" selected>🍺 Medium — The Regular</option>
+    <option value="hard">🔥 Hard — The Brewmaster</option>
+  </select>
   <div class="gap"></div>
   <button class="btn btn-gold" onclick="createRoom()">Start Game</button>
   <div class="or-div" id="or-div">— or —</div>
@@ -521,6 +526,7 @@ document.getElementById('game-mode').addEventListener('change', function() {
   document.getElementById('or-div').style.display = isCpu ? 'none' : '';
   document.getElementById('join-code').style.display = isCpu ? 'none' : '';
   document.getElementById('join-btn').style.display = isCpu ? 'none' : '';
+  document.getElementById('cpu-difficulty').style.display = isCpu ? '' : 'none';
 });
 
 function createRoom() {
@@ -532,17 +538,19 @@ function createRoom() {
   var vsComputer = false;
   if (mode === 'online-4') maxP = 4;
   else if (mode === 'cpu') { maxP = 2; vsComputer = true; }
+  var difficulty = document.getElementById('cpu-difficulty').value;
 
-  socket.emit('create-room', { name: name, maxPlayers: maxP, vsComputer: vsComputer }, function(res) {
+  socket.emit('create-room', { name: name, maxPlayers: maxP, vsComputer: vsComputer, difficulty: difficulty }, function(res) {
     if (res.success) {
       roomCode = res.code; isHost = true; myIndex = 0;
       isVsComputer = res.vsComputer || false;
 
       if (isVsComputer) {
         // Skip lobby, go straight to game
+        var aiNames = { easy: '🤖 Rookie', medium: '🤖 Computer', hard: '🤖 Brewmaster' };
         document.getElementById('lobby-code').textContent = res.code;
         showScreen('screen-lobby');
-        updateLobby([name, '🤖 Computer'], 2);
+        updateLobby([name, aiNames[difficulty] || '🤖 Computer'], 2);
         // Auto-start after a moment
         setTimeout(function() {
           socket.emit('start-game', { code: roomCode });

@@ -1,5 +1,8 @@
-// ── AI Player for Setback (Medium difficulty) ───────────
-// Makes decent decisions but not perfect — beatable by a good player
+// ── AI Player for Setback ───────────────────────────────
+// Three difficulties:
+//   easy   — timid bidder, plays mostly random legal cards
+//   medium — decent decisions but not perfect (the original AI)
+//   hard   — bids accurately, strips trump, saves winners, dumps junk
 
 var SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
 var RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
@@ -99,19 +102,36 @@ function evaluateHand(hand) {
 }
 
 // ── AI: Decide bid ──────────────────────────────────────
-function aiBid(hand, highBid, isDealer, allPassed) {
+function aiBid(hand, highBid, isDealer, allPassed, difficulty) {
   var eval_ = evaluateHand(hand);
 
   // If dealer and everyone passed, stuck with 3
   if (isDealer && allPassed) return 3;
 
-  // Decide based on estimated points
+  if (difficulty === 'easy') {
+    // Timid: only bids 3 on a clearly good hand, and not always even then
+    var bid = 0;
+    if (eval_.estimatedPoints >= 4 && Math.random() < 0.5) bid = 3;
+    if (bid <= highBid) bid = 0;
+    return bid;
+  }
+
+  if (difficulty === 'hard') {
+    // Bid what the hand is worth, minimally outbidding the opponent
+    var worth = Math.floor(eval_.estimatedPoints);
+    if (worth > 6) worth = 6;
+    if (worth < 3) return 0;                 // hand not worth a bid
+    if (worth <= highBid) return 0;          // can't profitably outbid
+    var bid = Math.max(3, highBid + 1);      // bid just enough to win it
+    return Math.min(bid, worth);
+  }
+
+  // Medium (default): decide based on estimated points with some randomness
   var bid = 0;
   if (eval_.estimatedPoints >= 5) bid = 5;
   else if (eval_.estimatedPoints >= 4) bid = 4;
   else if (eval_.estimatedPoints >= 3) bid = 3;
 
-  // Add some randomness — occasionally bump up or down
   if (Math.random() < 0.15 && bid > 0) bid = Math.min(6, bid + 1); // aggressive sometimes
   if (Math.random() < 0.1 && bid > 3) bid = bid - 1; // cautious sometimes
 
@@ -122,14 +142,33 @@ function aiBid(hand, highBid, isDealer, allPassed) {
 }
 
 // ── AI: Pick trump suit ─────────────────────────────────
-function aiPickTrump(hand) {
+function aiPickTrump(hand, difficulty) {
   var eval_ = evaluateHand(hand);
+  if (difficulty === 'easy' && Math.random() < 0.25) {
+    // Occasionally picks a suit on a whim
+    var suitsInHand = [];
+    for (var i = 0; i < hand.length; i++) {
+      if (hand[i].rank !== 'Joker' && suitsInHand.indexOf(hand[i].suit) === -1) suitsInHand.push(hand[i].suit);
+    }
+    if (suitsInHand.length > 0) return suitsInHand[Math.floor(Math.random() * suitsInHand.length)];
+  }
   return eval_.bestSuit || SUITS[Math.floor(Math.random() * SUITS.length)];
 }
 
 // ── AI: Pick cards to keep during discard ────────────────
-function aiDiscard(hand, trumpSuit, isBidWinner) {
-  // Score each card for how useful it is
+function aiDiscard(hand, trumpSuit, isBidWinner, difficulty) {
+  if (difficulty === 'easy') {
+    // Keeps trump but fills the rest of the hand at random
+    var trump = [], rest = [];
+    for (var i = 0; i < hand.length; i++) {
+      (isTrump(hand[i], trumpSuit) ? trump : rest).push(hand[i]);
+    }
+    rest.sort(function() { return Math.random() - 0.5; });
+    var keep = trump.concat(rest).slice(0, 6);
+    return keep.map(cardId);
+  }
+
+  // Medium & hard: score each card for how useful it is
   var scored = [];
   for (var i = 0; i < hand.length; i++) {
     var c = hand[i];
@@ -160,7 +199,7 @@ function aiDiscard(hand, trumpSuit, isBidWinner) {
 }
 
 // ── AI: Play a card ─────────────────────────────────────
-function aiPlayCard(hand, trickPlays, trumpSuit, isLeading) {
+function aiPlayCard(hand, trickPlays, trumpSuit, isLeading, difficulty) {
   if (hand.length === 0) return null;
   if (hand.length === 1) return cardId(hand[0]);
 
@@ -170,6 +209,22 @@ function aiPlayCard(hand, trickPlays, trumpSuit, isLeading) {
   for (var i = 0; i < hand.length; i++) {
     if (isTrump(hand[i], trumpSuit)) trumpCards.push(hand[i]);
     else nonTrumpCards.push(hand[i]);
+  }
+
+  if (difficulty === 'easy') {
+    // Plays a random legal card
+    if (isLeading) return cardId(hand[Math.floor(Math.random() * hand.length)]);
+    var leadSuitEasy = effectiveSuit(trickPlays[0].card, trumpSuit);
+    var followEasy = [];
+    for (var i = 0; i < hand.length; i++) {
+      if (effectiveSuit(hand[i], trumpSuit) === leadSuitEasy) followEasy.push(hand[i]);
+    }
+    var pool = followEasy.length > 0 ? followEasy : hand;
+    return cardId(pool[Math.floor(Math.random() * pool.length)]);
+  }
+
+  if (difficulty === 'hard') {
+    return aiPlayCardHard(hand, trickPlays, trumpSuit, isLeading, trumpCards, nonTrumpCards);
   }
 
   if (isLeading) {
@@ -269,6 +324,101 @@ function aiPlayCard(hand, trickPlays, trumpSuit, isLeading) {
     }
   }
   return cardId(allCards[0]);
+}
+
+// ── Hard AI card play ───────────────────────────────────
+function aiPlayCardHard(hand, trickPlays, trumpSuit, isLeading, trumpCards, nonTrumpCards) {
+  var byTrumpAsc = function(a, b) { return trumpPower(a, trumpSuit) - trumpPower(b, trumpSuit); };
+  var byPlainAsc = function(a, b) { return plainPower(a) - plainPower(b); };
+
+  // Game-point value of a card (10s are the big prize)
+  function gamePoints(card) {
+    var r = card.rank;
+    if (r === '10') return 10;
+    if (r === 'A') return 4;
+    if (r === 'K') return 3;
+    if (r === 'Q') return 2;
+    if (r === 'J') return 1;
+    return 0;
+  }
+
+  if (isLeading) {
+    trumpCards.sort(byTrumpAsc);
+    nonTrumpCards.sort(byPlainAsc);
+
+    // With a commanding trump (Joker/Ace) and depth, lead it to strip
+    // the opponent's trump and protect our point cards
+    if (trumpCards.length >= 2 && trumpPower(trumpCards[trumpCards.length - 1], trumpSuit) >= 13) {
+      return cardId(trumpCards[trumpCards.length - 1]);
+    }
+    // Lead a boss side-suit card (ace) to bank game points
+    if (nonTrumpCards.length > 0 && nonTrumpCards[nonTrumpCards.length - 1].rank === 'A') {
+      return cardId(nonTrumpCards[nonTrumpCards.length - 1]);
+    }
+    // Lead low junk from a side suit; keep trump and point cards home
+    if (nonTrumpCards.length > 0) {
+      for (var i = 0; i < nonTrumpCards.length; i++) {
+        if (gamePoints(nonTrumpCards[i]) === 0) return cardId(nonTrumpCards[i]);
+      }
+      return cardId(nonTrumpCards[0]);
+    }
+    // Only trump left: lead lowest to keep control cards
+    return cardId(trumpCards[0]);
+  }
+
+  // Following
+  var leadSuit = effectiveSuit(trickPlays[0].card, trumpSuit);
+  var followCards = [];
+  for (var i = 0; i < hand.length; i++) {
+    if (effectiveSuit(hand[i], trumpSuit) === leadSuit) followCards.push(hand[i]);
+  }
+
+  // What's the trick worth in game points, and what power is winning?
+  var trickValue = 0;
+  var bestPower = -1;
+  for (var i = 0; i < trickPlays.length; i++) {
+    trickValue += gamePoints(trickPlays[i].card);
+    var tp;
+    if (isTrump(trickPlays[i].card, trumpSuit)) tp = 100 + trumpPower(trickPlays[i].card, trumpSuit);
+    else if (effectiveSuit(trickPlays[i].card, trumpSuit) === leadSuit) tp = plainPower(trickPlays[i].card);
+    else tp = -1;
+    if (tp > bestPower) bestPower = tp;
+  }
+
+  if (followCards.length > 0) {
+    var isTrumpLead = (leadSuit === trumpSuit);
+    followCards.sort(isTrumpLead ? byTrumpAsc : byPlainAsc);
+    var powerOf = function(c) {
+      return isTrumpLead ? 100 + trumpPower(c, trumpSuit) : plainPower(c);
+    };
+    // Win with the cheapest card that wins
+    for (var i = 0; i < followCards.length; i++) {
+      if (powerOf(followCards[i]) > bestPower) return cardId(followCards[i]);
+    }
+    // Can't win — throw the lowest card that gives away the fewest game points
+    var cheapest = followCards[0];
+    for (var i = 0; i < followCards.length; i++) {
+      if (gamePoints(followCards[i]) < gamePoints(cheapest)) cheapest = followCards[i];
+    }
+    return cardId(cheapest);
+  }
+
+  // Can't follow suit — trump whenever the trick carries game points
+  if (trumpCards.length > 0 && trickValue >= 1) {
+    trumpCards.sort(byTrumpAsc);
+    for (var i = 0; i < trumpCards.length; i++) {
+      if (100 + trumpPower(trumpCards[i], trumpSuit) > bestPower) return cardId(trumpCards[i]);
+    }
+  }
+
+  // Throw off the most worthless non-trump card
+  var throwables = nonTrumpCards.length > 0 ? nonTrumpCards.slice() : hand.slice();
+  throwables.sort(byPlainAsc);
+  var junk = throwables[0];
+  for (var i = 0; i < throwables.length; i++) {
+    if (gamePoints(throwables[i]) === 0) { junk = throwables[i]; break; }
+  }
+  return cardId(junk);
 }
 
 module.exports = {
