@@ -199,6 +199,30 @@
     color:var(--gold); font-weight:800; max-width:320px; animation:pulse 2s ease-in-out infinite; }
   .toast.good { background:linear-gradient(180deg, #ffd77a, var(--amber)); color:#3a2410; }
 
+  /* ── Help system ──────────────────────── */
+  .help-fab { position:fixed; top:14px; right:14px; z-index:900; width:40px; height:40px; border-radius:50%;
+    border:2px solid rgba(255,179,71,0.5); background:rgba(0,0,0,0.5); color:var(--gold);
+    font-family:'Alfa Slab One',serif; font-size:1.15em; cursor:pointer;
+    box-shadow:0 3px 8px rgba(0,0,0,0.4); transition:transform 0.12s; }
+  .help-fab:active { transform:scale(0.88); }
+  .help-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; display:none;
+    align-items:center; justify-content:center; padding:20px; }
+  .help-overlay.open { display:flex; animation:screenIn 0.25s ease-out; }
+  .help-card { background:linear-gradient(180deg, #3d2612, #241505); border:2px solid rgba(255,179,71,0.45);
+    border-radius:16px; max-width:360px; width:100%; max-height:80vh; overflow-y:auto; padding:20px;
+    box-shadow:0 10px 40px rgba(0,0,0,0.65); -webkit-overflow-scrolling:touch; }
+  .help-card h3 { font-family:'Alfa Slab One',serif; color:var(--gold); margin:0 0 12px; text-align:center; font-size:1.2em; }
+  .help-card h4 { color:var(--amber); margin:14px 0 6px; font-size:0.95em; }
+  .help-card p { font-size:0.9em; color:var(--cream); margin:0 0 10px; line-height:1.5; }
+  .help-card ul { margin:0 0 10px 18px; padding:0; font-size:0.9em; line-height:1.55; color:var(--cream); }
+  .help-card b { color:var(--gold); }
+  .help-card .btn { margin-top:8px; }
+
+  /* Winning card highlight on trick result */
+  .card.winning-card { box-shadow:0 0 0 3px var(--gold), 0 0 22px rgba(245,197,66,0.7); transform:translateY(-6px) scale(1.06); }
+  .trick-card-slot .winner-tag { font-size:0.65em; font-weight:800; color:var(--gold); letter-spacing:0.5px; }
+  .trick-card-slot.losing-slot { opacity:0.55; }
+
   /* ── Confetti ─────────────────────────── */
   .confetti { position:fixed; top:-24px; width:10px; height:14px; z-index:998; pointer-events:none; border-radius:2px; animation:confettiFall linear forwards; }
   .confetti.emoji { width:auto; height:auto; background:none!important; font-size:1.5em; }
@@ -232,6 +256,7 @@
   <div class="or-div" id="or-div">— or —</div>
   <input type="text" id="join-code" placeholder="Enter room code" maxlength="12" autocomplete="off" style="text-transform:uppercase" id="join-code-input">
   <button class="btn btn-green" id="join-btn" onclick="joinRoom()">Join Game</button>
+  <button class="btn btn-green btn-sm" onclick="showGuide()">📖 Learn to Play</button>
   <p class="error" id="home-error"></p>
 </div>
 
@@ -355,6 +380,16 @@
   <button class="btn btn-gold" onclick="location.reload()">Back to Home</button>
 </div>
 
+<!-- HELP -->
+<button class="help-fab" onclick="showHelp()" title="Help">?</button>
+<div class="help-overlay" id="help-overlay" onclick="if(event.target===this)closeHelp()">
+  <div class="help-card">
+    <h3 id="help-title"></h3>
+    <div id="help-body"></div>
+    <button class="btn btn-gold" onclick="closeHelp()">Got it! 🍻</button>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script src="/qrcode.js"></script>
 <script>
@@ -374,9 +409,97 @@ var discardHand = [];
 var SUIT_SYMBOLS = { hearts:'♥', diamonds:'♦', clubs:'♣', spades:'♠', joker:'★' };
 var SUIT_COLORS = { hearts:'red', diamonds:'red', clubs:'black', spades:'black', joker:'joker' };
 
+var currentScreenId = 'screen-home';
+
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
   document.getElementById(id).classList.add('active');
+  currentScreenId = id;
+}
+
+// ── Help system ───────────────────────────
+var HELP = {
+  'screen-home': { title: '🍺 Welcome to Setback', body:
+    '<p><b>Setback</b> (6-Point Pitch) is a classic trick-taking card game. First to <b>21 points</b> wins.</p>' +
+    '<p>Enter your name and start a game — play online with friends using a room code, or against the computer at four difficulty levels.</p>' +
+    '<p>New to the game? Tap <b>📖 Learn to Play</b> below for the full rundown.</p>' },
+  'screen-lobby': { title: '🍻 The Lobby', body:
+    '<p>Waiting on your crew! Friends can join three ways:</p>' +
+    '<ul><li><b>Scan the QR code</b> with their phone camera</li>' +
+    '<li><b>📨 Invite Friends</b> — send the link by text</li>' +
+    '<li>Type the <b>room code</b> on the home screen</li></ul>' +
+    '<p>Everyone needs to be on the same WiFi as the host server.</p>' },
+  'screen-bid': { title: '🎯 Bidding', body:
+    '<p>Look at your 6 cards and bid <b>3 to 6</b> — how many of the 6 possible points you think you can win this hand. Highest bidder gets the <b>kitty</b> (extra cards) and picks trump.</p>' +
+    '<p><b>Make your bid</b> and you keep every point you took. <b>Fall short</b> and you get <i>set back</i> — you LOSE your bid from your score!</p>' +
+    '<p>If everyone passes, the dealer is stuck bidding 3.</p>' +
+    '<p>The 6 points: High, Low, Jack, Off-Jack, Joker, and Game. Tap 📖 on the home screen for details.</p>' },
+  'screen-trump': { title: '👑 Picking Trump', body:
+    '<p>You won the bid! Pick your <b>strongest suit</b> as trump — trump cards beat every other suit.</p>' +
+    '<p>Remember: the <b>Joker</b> and the <b>Off-Jack</b> (the other Jack of the same color as trump) count as trump too.</p>' +
+    '<p>Usually you want the suit where you hold the most cards, or the biggest ones.</p>' },
+  'screen-wait-trump': { title: '👑 Trump', body:
+    '<p>The bid winner is choosing trump. Once picked, trump cards beat everything else — including the <b>Joker</b> and <b>Off-Jack</b> (other Jack of the same color), which both count as trump.</p>' },
+  'screen-discard': { title: '🃏 Keep & Draw', body:
+    '<p>Choose up to <b>6 cards to keep</b>; the rest are tossed and you draw back up to 6.</p>' +
+    '<p>Tips: <b>keep every trump card</b> — they win tricks and carry the points. Aces and 10s are great too (10s are worth 10 toward the Game point!).</p>' },
+  'screen-wait-discard': { title: '🃏 Keep & Draw', body:
+    '<p>Everyone is trimming their hand down to their best 6 cards. Play starts when all are ready.</p>' },
+  'screen-play': { title: '🎴 Playing Tricks', body:
+    '<p>The leader plays any card; everyone else must <b>follow the lead suit</b> if they can — or play <b>trump</b>, which is always allowed.</p>' +
+    '<p>Highest trump wins the trick; if no trump was played, highest card of the <b>lead suit</b> wins.</p>' +
+    '<p>⚠️ <b>A card thrown off-suit can NEVER win</b> — not even an Ace! And point cards go to whoever <b>captures</b> them, not who played them. Throwing your Jack into a losing trick hands that point to your opponent!</p>' },
+  'screen-trick-result': { title: '🏆 Trick Won', body:
+    '<p>The glowing card is the winner — highest trump in the trick, or highest card of the lead suit if nobody trumped.</p>' +
+    '<p>The winner <b>captures all cards</b> in the trick. Any point cards in there (Jacks, the Joker, low trump, 10s...) now count for the capturer!</p>' },
+  'screen-result': { title: '📋 Hand Scoring', body:
+    '<p>Six points were up for grabs this hand:</p>' +
+    '<ul><li><b>High</b> — highest trump played</li>' +
+    '<li><b>Low</b> — lowest trump, goes to whoever <i>captured</i> it</li>' +
+    '<li><b>Jack</b> — capture the Jack of trump</li>' +
+    '<li><b>Off-Jack</b> — capture the other Jack of trump\'s color</li>' +
+    '<li><b>Joker</b> — capture the Joker</li>' +
+    '<li><b>Game</b> — most card points captured (10=10, A=4, K=3, Q=2, J=1)</li></ul>' +
+    '<p>If the bidder made their bid, everyone keeps what they took. If not, the bidder is <b>set back</b> their full bid!</p>' },
+  'screen-gameover': { title: '🏆 Game Over', body:
+    '<p>First to <b>21 points</b> takes the game. Rack up points hand by hand — and set your opponents back when they overbid!</p>' },
+  'screen-dc': { title: '💔 Disconnected', body:
+    '<p>Someone left the game or lost connection. Head back home and start a fresh one — the room codes are single-use.</p>' }
+};
+
+var GUIDE_BODY =
+  '<p><b>Setback</b> (6-Point Pitch) is a race to <b>21 points</b>, played in hands of 6 tricks. Up to <b>6 points</b> are available every hand.</p>' +
+  '<h4>The 6 points</h4>' +
+  '<ul><li><b>High</b> — play the highest trump of the hand</li>' +
+  '<li><b>Low</b> — <i>capture</i> the lowest trump of the hand</li>' +
+  '<li><b>Jack</b> — capture the Jack of trump</li>' +
+  '<li><b>Off-Jack</b> — capture the other Jack of trump\'s color</li>' +
+  '<li><b>Joker</b> — capture the Joker (highest trump of all!)</li>' +
+  '<li><b>Game</b> — capture the most card points: 10s are worth 10, Aces 4, Kings 3, Queens 2, Jacks 1</li></ul>' +
+  '<h4>Bidding</h4>' +
+  '<p>Everyone gets 6 cards, then bids <b>3–6</b>: how many points you promise to win. The high bidder gets the <b>kitty</b> (bonus cards), picks <b>trump</b>, and everyone keeps their best 6 and draws fresh cards for the rest.</p>' +
+  '<p>Make your bid → keep all points you took. Miss it → you\'re <b>SET BACK</b>: your score <i>drops</i> by your bid. If everyone passes, the dealer is stuck bidding 3.</p>' +
+  '<h4>Playing a trick</h4>' +
+  '<p>The leader plays a card. You must <b>follow the lead suit</b> if you can — playing <b>trump</b> is always allowed instead. Highest trump wins; no trump means highest card of the lead suit wins.</p>' +
+  '<p>⚠️ Two rookie traps: a card thrown <b>off-suit can never win</b> (even an Ace!), and points belong to whoever <b>captures</b> the cards — throw your Jack into a losing trick and your opponent pockets that point.</p>' +
+  '<h4>Trump family</h4>' +
+  '<p>Trump = the chosen suit <b>plus</b> the Off-Jack (same-color Jack) <b>plus</b> the Joker. Order: Joker beats Ace beats King... and the Off-Jack slots between the Jack and the 10.</p>';
+
+function showHelp(screenId) {
+  var h = HELP[screenId || currentScreenId] || HELP['screen-home'];
+  document.getElementById('help-title').innerHTML = h.title;
+  document.getElementById('help-body').innerHTML = h.body;
+  document.getElementById('help-overlay').classList.add('open');
+}
+
+function showGuide() {
+  document.getElementById('help-title').innerHTML = '📖 How to Play Setback';
+  document.getElementById('help-body').innerHTML = GUIDE_BODY;
+  document.getElementById('help-overlay').classList.add('open');
+}
+
+function closeHelp() {
+  document.getElementById('help-overlay').classList.remove('open');
 }
 
 function showToast(msg, good) {
@@ -856,7 +979,17 @@ socket.on('trick-result', function(data) {
   var area = document.getElementById('trick-result-cards');
   area.innerHTML = '';
   for (var i = 0; i < data.cards.length; i++) {
-    area.appendChild(renderCard(data.cards[i].card, { small:true }));
+    var isWinner = (data.cards[i].player === data.winner);
+    var slot = document.createElement('div');
+    slot.className = 'trick-card-slot' + (isWinner ? '' : ' losing-slot');
+    var cardEl = renderCard(data.cards[i].card, { small: true });
+    if (isWinner) cardEl.classList.add('winning-card');
+    slot.appendChild(cardEl);
+    var tag = document.createElement('span');
+    tag.className = isWinner ? 'winner-tag' : 'slot-name';
+    tag.textContent = isWinner ? '★ WINNER' : (gameState && gameState.players ? gameState.players[data.cards[i].player] : '');
+    slot.appendChild(tag);
+    area.appendChild(slot);
   }
   showScreen('screen-trick-result');
 });
